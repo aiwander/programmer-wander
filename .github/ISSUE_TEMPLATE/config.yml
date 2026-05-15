@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/AIWander/Programmer-Wander/discussions
+    about: Questions, ideas, general chat
+  - name: Companion repo (Universal-Ops)
+    url: https://github.com/AIWander/Universal-Ops
+    about: Multi-AI orchestrator (manager + ops + dashboard)

@@ -120,9 +120,9 @@ cargo build --release
 
 Requires Rust 1.75+.
 
-## Companion: AIWander/Ops
+## Companion: AIWander/Universal-Ops
 
-Programmer-Wander is the **dev shell** for a single AI. If you want a **multi-AI orchestrator** (manager + ops + dashboard) that pairs with Claude Desktop / Cowork and brings in the smartest available coding agent on demand, see [AIWander/Ops](https://github.com/AIWander/Ops).
+Programmer-Wander is the **dev shell** for a single AI. If you want a **multi-AI orchestrator** (manager + ops + dashboard) that pairs with Claude Desktop / Cowork and brings in the smartest available coding agent on demand, see [AIWander/Universal-Ops](https://github.com/AIWander/Universal-Ops).
 
 The two repos are independent — you can install either, both, or neither.
 

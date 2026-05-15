@@ -1,0 +1,20 @@
+[package]
+name = "programmer"
+version = "0.1.0-alpha"
+edition = "2021"
+authors = ["Joseph Wander <josephwander@gmail.com>"]
+license = "MIT"
+description = "MCP server giving any AI a complete Rust + Windows dev shell"
+repository = "https://github.com/AIWander/Programmer-Wander"
+readme = "README.md"
+rust-version = "1.75"
+
+[[bin]]
+name = "programmer"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
