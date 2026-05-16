@@ -44,7 +44,7 @@
                               Source="$(var.CargoTargetBinDir)\programmer.exe"
                               KeyPath="yes"/>
                     </Component>
-                    <Component Id="ProgrammerPath" Guid="*" Win64="$(var.Win64)" KeyPath="yes">
+                    <Component Id="ProgrammerPath" Guid="E450F36E-D871-4D5F-A78B-90415E1E4132" Win64="$(var.Win64)" KeyPath="yes">
                         <Environment Id="ProgrammerPathEnv"
                                      Name="PATH"
                                      Value="[APPLICATIONFOLDER]"
