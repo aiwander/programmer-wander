@@ -35,9 +35,6 @@ sysinfo = "0.29"
 # Clipboard (Windows)
 arboard = "3.2"
 
-# Git operations
-git2 = "0.18"
-
 # Database
 rusqlite = { version = "0.29", features = ["bundled"] }
 
