@@ -1,11 +1,11 @@
 //! Security tools - check commands and audit logging
 //! Ported from local's security module
 
-use serde_json::{json, Value};
 use anyhow::Result;
+use chrono::Local;
+use serde_json::{json, Value};
 use std::fs::OpenOptions;
 use std::io::Write;
-use chrono::Local;
 
 const DANGEROUS_PATTERNS: &[(&str, &str)] = &[
     ("rm -rf /", "Recursive delete of root filesystem"),
@@ -17,7 +17,10 @@ const DANGEROUS_PATTERNS: &[(&str, &str)] = &[
     (":(){:|:&};:", "Fork bomb (bash)"),
     ("while(1){start powershell}", "Fork bomb (PowerShell)"),
     ("reg delete hklm", "Delete system registry keys"),
-    ("reg delete hkcu\\software\\microsoft", "Delete critical user registry"),
+    (
+        "reg delete hkcu\\software\\microsoft",
+        "Delete critical user registry",
+    ),
     ("cipher /w:", "Secure wipe (often ransomware)"),
     ("-encodedcommand", "Obfuscated PowerShell (malware pattern)"),
     ("invoke-webrequest.*|iex", "Download and execute pattern"),
@@ -29,13 +32,28 @@ const CONTEXT_PATTERNS: &[(&str, &str)] = &[
     ("rm -rf", "Recursive delete - check target path"),
     ("del /s", "Recursive delete - check target path"),
     ("rd /s", "Remove directory recursively - check target path"),
-    ("rmdir /s", "Remove directory recursively - check target path"),
+    (
+        "rmdir /s",
+        "Remove directory recursively - check target path",
+    ),
 ];
 
 const SAFE_PATHS: &[&str] = &[
-    "./", ".\\", "node_modules", "target/", "target\\",
-    "dist/", "dist\\", "build/", "build\\",
-    "__pycache__", ".cache", "temp/", "temp\\", "tmp/", "tmp\\",
+    "./",
+    ".\\",
+    "node_modules",
+    "target/",
+    "target\\",
+    "dist/",
+    "dist\\",
+    "build/",
+    "build\\",
+    "__pycache__",
+    ".cache",
+    "temp/",
+    "temp\\",
+    "tmp/",
+    "tmp\\",
 ];
 
 const AUDIT_LOG: &str = "C:\\temp\\mcp_security_audit.log";
@@ -44,17 +62,39 @@ pub fn check_command_safety(command: &str) -> (bool, Option<String>, &'static st
     let cmd_lower = command.to_lowercase();
     for (pattern, reason) in DANGEROUS_PATTERNS {
         if cmd_lower.contains(&pattern.to_lowercase()) {
-            return (false, Some(format!("BLOCKED: {} - {}", pattern, reason)), "critical");
+            return (
+                false,
+                Some(format!("BLOCKED: {} - {}", pattern, reason)),
+                "critical",
+            );
         }
     }
     for (pattern, reason) in CONTEXT_PATTERNS {
         if cmd_lower.contains(&pattern.to_lowercase()) {
             if !SAFE_PATHS.iter().any(|s| cmd_lower.contains(s)) {
-                return (false, Some(format!("WARNING: {} - verify target is safe", reason)), "warning");
+                return (
+                    false,
+                    Some(format!("WARNING: {} - verify target is safe", reason)),
+                    "warning",
+                );
             }
         }
     }
     (true, None, "safe")
+}
+
+pub fn enforce_command_safety(command: &str) -> Result<Option<String>> {
+    let (is_safe, warning, severity) = check_command_safety(command);
+    if let Some(message) = warning.as_deref() {
+        audit_log_entry(command, message, severity);
+    }
+    if !is_safe {
+        let blocked_message = warning
+            .clone()
+            .unwrap_or_else(|| "Command blocked by safety policy".to_string());
+        anyhow::bail!("{}", blocked_message);
+    }
+    Ok(warning)
 }
 
 pub fn audit_log_entry(command: &str, result: &str, severity: &str) {
@@ -83,7 +123,7 @@ pub async fn audit_log(args: Value) -> Result<Value> {
         Ok(content) => {
             let entries: Vec<&str> = content.lines().rev().take(lines).collect();
             Ok(json!({ "entries": entries, "count": entries.len(), "log_path": AUDIT_LOG }))
-        },
-        Err(_) => Ok(json!({ "entries": [], "count": 0, "note": "No audit log yet" }))
+        }
+        Err(_) => Ok(json!({ "entries": [], "count": 0, "note": "No audit log yet" })),
     }
 }

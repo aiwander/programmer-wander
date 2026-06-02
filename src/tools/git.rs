@@ -7,34 +7,41 @@ use tokio::process::Command;
 
 /// Get git status
 pub async fn status(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+
     // Get branch
     let branch_output = Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(repo_path)
         .output()
         .await?;
-    let branch = String::from_utf8_lossy(&branch_output.stdout).trim().to_string();
-    
+    let branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+
     // Get status
     let status_output = Command::new("git")
         .args(["status", "--porcelain"])
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     let status_str = String::from_utf8_lossy(&status_output.stdout);
-    
+
     let mut modified = Vec::new();
     let mut staged = Vec::new();
     let mut untracked = Vec::new();
-    
+
     for line in status_str.lines() {
-        if line.len() < 3 { continue; }
+        if line.len() < 3 {
+            continue;
+        }
         let status = &line[0..2];
         let file = line[3..].to_string();
-        
+
         match status.chars().next() {
             Some('M') | Some('A') | Some('D') | Some('R') => staged.push(file.clone()),
             _ => {}
@@ -45,7 +52,7 @@ pub async fn status(args: Value) -> Result<Value> {
             _ => {}
         }
     }
-    
+
     // Get ahead/behind
     let ahead_behind = Command::new("git")
         .args(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
@@ -54,17 +61,17 @@ pub async fn status(args: Value) -> Result<Value> {
         .await
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    
+
     let (ahead, behind) = if let Some(ab) = ahead_behind {
         let parts: Vec<&str> = ab.split_whitespace().collect();
         (
             parts.first().and_then(|s| s.parse().ok()).unwrap_or(0),
-            parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0)
+            parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0),
         )
     } else {
         (0, 0)
     };
-    
+
     Ok(json!({
         "success": true,
         "branch": branch,
@@ -79,10 +86,16 @@ pub async fn status(args: Value) -> Result<Value> {
 
 /// Get git diff
 pub async fn diff(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    let staged = args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false);
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let staged = args
+        .get("staged")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let file = args.get("file").and_then(|v| v.as_str());
-    
+
     let mut cmd_args = vec!["diff"];
     if staged {
         cmd_args.push("--cached");
@@ -91,19 +104,25 @@ pub async fn diff(args: Value) -> Result<Value> {
         cmd_args.push("--");
         cmd_args.push(f);
     }
-    
+
     let output = Command::new("git")
         .args(&cmd_args)
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     let diff_str = String::from_utf8_lossy(&output.stdout).to_string();
-    
+
     // Count additions/deletions
-    let additions = diff_str.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++")).count();
-    let deletions = diff_str.lines().filter(|l| l.starts_with('-') && !l.starts_with("---")).count();
-    
+    let additions = diff_str
+        .lines()
+        .filter(|l| l.starts_with('+') && !l.starts_with("+++"))
+        .count();
+    let deletions = diff_str
+        .lines()
+        .filter(|l| l.starts_with('-') && !l.starts_with("---"))
+        .count();
+
     Ok(json!({
         "success": true,
         "diff": diff_str,
@@ -115,12 +134,16 @@ pub async fn diff(args: Value) -> Result<Value> {
 
 /// Create commit
 pub async fn commit(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
     let message = args.get("message").and_then(|v| v.as_str());
-    let files: Option<Vec<&str>> = args.get("files")
+    let files: Option<Vec<&str>> = args
+        .get("files")
         .and_then(|v| v.as_array())
         .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect());
-    
+
     // Stage files if specified
     if let Some(files) = files {
         for file in files {
@@ -138,7 +161,7 @@ pub async fn commit(args: Value) -> Result<Value> {
             .output()
             .await?;
     }
-    
+
     // Commit
     let mut commit_args = vec!["commit"];
     if let Some(msg) = message {
@@ -149,7 +172,7 @@ pub async fn commit(args: Value) -> Result<Value> {
         commit_args.push("-m");
         commit_args.push("");
     }
-    
+
     let output = Command::new("git")
         .args(&commit_args)
         .current_dir(repo_path)
@@ -157,7 +180,7 @@ pub async fn commit(args: Value) -> Result<Value> {
         .stderr(Stdio::piped())
         .output()
         .await?;
-    
+
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         Ok(json!({
@@ -175,15 +198,21 @@ pub async fn commit(args: Value) -> Result<Value> {
 
 /// Push to remote
 pub async fn push(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    let remote = args.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let remote = args
+        .get("remote")
+        .and_then(|v| v.as_str())
+        .unwrap_or("origin");
     let branch = args.get("branch").and_then(|v| v.as_str());
-    
+
     let mut cmd_args = vec!["push", remote];
     if let Some(b) = branch {
         cmd_args.push(b);
     }
-    
+
     let output = Command::new("git")
         .args(&cmd_args)
         .current_dir(repo_path)
@@ -191,7 +220,7 @@ pub async fn push(args: Value) -> Result<Value> {
         .stderr(Stdio::piped())
         .output()
         .await?;
-    
+
     if output.status.success() {
         Ok(json!({
             "success": true,
@@ -208,9 +237,15 @@ pub async fn push(args: Value) -> Result<Value> {
 
 /// Pull from remote
 pub async fn pull(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    let remote = args.get("remote").and_then(|v| v.as_str()).unwrap_or("origin");
-    
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let remote = args
+        .get("remote")
+        .and_then(|v| v.as_str())
+        .unwrap_or("origin");
+
     let output = Command::new("git")
         .args(["pull", remote])
         .current_dir(repo_path)
@@ -218,7 +253,7 @@ pub async fn pull(args: Value) -> Result<Value> {
         .stderr(Stdio::piped())
         .output()
         .await?;
-    
+
     if output.status.success() {
         Ok(json!({
             "success": true,
@@ -234,21 +269,25 @@ pub async fn pull(args: Value) -> Result<Value> {
 
 /// Get commit log
 pub async fn log(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10);
-    
+
     let output = Command::new("git")
         .args([
-            "log", 
+            "log",
             &format!("-{}", limit),
-            "--pretty=format:%H|%h|%an|%ae|%at|%s"
+            "--pretty=format:%H|%h|%an|%ae|%at|%s",
         ])
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     let log_str = String::from_utf8_lossy(&output.stdout);
-    let commits: Vec<Value> = log_str.lines()
+    let commits: Vec<Value> = log_str
+        .lines()
         .filter(|l| !l.is_empty())
         .map(|line| {
             let parts: Vec<&str> = line.splitn(6, '|').collect();
@@ -262,7 +301,7 @@ pub async fn log(args: Value) -> Result<Value> {
             })
         })
         .collect();
-    
+
     Ok(json!({
         "success": true,
         "commits": commits,
@@ -272,10 +311,16 @@ pub async fn log(args: Value) -> Result<Value> {
 
 /// List/create/delete branches
 pub async fn branch(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
     let name = args.get("name").and_then(|v| v.as_str());
-    let delete = args.get("delete").and_then(|v| v.as_bool()).unwrap_or(false);
-    
+    let delete = args
+        .get("delete")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     if let Some(branch_name) = name {
         if delete {
             let output = Command::new("git")
@@ -283,7 +328,7 @@ pub async fn branch(args: Value) -> Result<Value> {
                 .current_dir(repo_path)
                 .output()
                 .await?;
-            
+
             return Ok(json!({
                 "success": output.status.success(),
                 "action": "deleted",
@@ -296,7 +341,7 @@ pub async fn branch(args: Value) -> Result<Value> {
                 .current_dir(repo_path)
                 .output()
                 .await?;
-            
+
             return Ok(json!({
                 "success": output.status.success(),
                 "action": "created",
@@ -305,26 +350,26 @@ pub async fn branch(args: Value) -> Result<Value> {
             }));
         }
     }
-    
+
     // List branches
     let output = Command::new("git")
         .args(["branch", "-a"])
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     let branches: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .map(|l| l.trim_start_matches("* ").trim().to_string())
         .filter(|l| !l.is_empty())
         .collect();
-    
+
     let current = Command::new("git")
         .args(["branch", "--show-current"])
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     Ok(json!({
         "success": true,
         "branches": branches,
@@ -334,11 +379,17 @@ pub async fn branch(args: Value) -> Result<Value> {
 
 /// Switch branch or restore file
 pub async fn checkout(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
     let branch_name = args.get("branch").and_then(|v| v.as_str());
     let file = args.get("file").and_then(|v| v.as_str());
-    let create = args.get("create").and_then(|v| v.as_bool()).unwrap_or(false);
-    
+    let create = args
+        .get("create")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     if let Some(f) = file {
         // Restore file
         let output = Command::new("git")
@@ -346,27 +397,27 @@ pub async fn checkout(args: Value) -> Result<Value> {
             .current_dir(repo_path)
             .output()
             .await?;
-        
+
         return Ok(json!({
             "success": output.status.success(),
             "action": "restored",
             "file": f
         }));
     }
-    
+
     if let Some(b) = branch_name {
         let mut cmd_args = vec!["checkout"];
         if create {
             cmd_args.push("-b");
         }
         cmd_args.push(b);
-        
+
         let output = Command::new("git")
             .args(&cmd_args)
             .current_dir(repo_path)
             .output()
             .await?;
-        
+
         return Ok(json!({
             "success": output.status.success(),
             "action": if create { "created_and_switched" } else { "switched" },
@@ -374,7 +425,7 @@ pub async fn checkout(args: Value) -> Result<Value> {
             "error": if output.status.success() { None } else { Some(String::from_utf8_lossy(&output.stderr).to_string()) }
         }));
     }
-    
+
     Ok(json!({
         "success": false,
         "error": "No branch or file specified"
@@ -383,10 +434,16 @@ pub async fn checkout(args: Value) -> Result<Value> {
 
 /// Manage git stash
 pub async fn stash(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("push");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("push");
     let message = args.get("message").and_then(|v| v.as_str());
-    
+
     match action {
         "push" => {
             let mut cmd_args = vec!["stash", "push"];
@@ -394,13 +451,13 @@ pub async fn stash(args: Value) -> Result<Value> {
                 cmd_args.push("-m");
                 cmd_args.push(msg);
             }
-            
+
             let output = Command::new("git")
                 .args(&cmd_args)
                 .current_dir(repo_path)
                 .output()
                 .await?;
-            
+
             Ok(json!({
                 "success": output.status.success(),
                 "action": "push",
@@ -413,7 +470,7 @@ pub async fn stash(args: Value) -> Result<Value> {
                 .current_dir(repo_path)
                 .output()
                 .await?;
-            
+
             Ok(json!({
                 "success": output.status.success(),
                 "action": "pop",
@@ -426,12 +483,12 @@ pub async fn stash(args: Value) -> Result<Value> {
                 .current_dir(repo_path)
                 .output()
                 .await?;
-            
+
             let stashes: Vec<String> = String::from_utf8_lossy(&output.stdout)
                 .lines()
                 .map(|l| l.to_string())
                 .collect();
-            
+
             Ok(json!({
                 "success": true,
                 "action": "list",
@@ -445,7 +502,7 @@ pub async fn stash(args: Value) -> Result<Value> {
                 .current_dir(repo_path)
                 .output()
                 .await?;
-            
+
             Ok(json!({
                 "success": output.status.success(),
                 "action": "drop",
@@ -455,36 +512,39 @@ pub async fn stash(args: Value) -> Result<Value> {
         _ => Ok(json!({
             "success": false,
             "error": format!("Unknown action: {}", action)
-        }))
+        })),
     }
 }
 
 /// Get structured diff summary for AI commit messages
 pub async fn diff_summary(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+
     // Get stat summary
     let stat_output = Command::new("git")
         .args(["diff", "--stat", "--cached"])
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     let stat_str = String::from_utf8_lossy(&stat_output.stdout).to_string();
-    
+
     // Get file list with status
     let files_output = Command::new("git")
         .args(["diff", "--name-status", "--cached"])
         .current_dir(repo_path)
         .output()
         .await?;
-    
+
     let files_str = String::from_utf8_lossy(&files_output.stdout);
-    
+
     let mut added = Vec::new();
     let mut modified = Vec::new();
     let mut deleted = Vec::new();
-    
+
     for line in files_str.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() >= 2 {
@@ -497,9 +557,10 @@ pub async fn diff_summary(args: Value) -> Result<Value> {
             }
         }
     }
-    
+
     // Group by extension
-    let mut by_extension: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+    let mut by_extension: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
     for file in added.iter().chain(modified.iter()) {
         let ext = std::path::Path::new(file)
             .extension()
@@ -507,7 +568,7 @@ pub async fn diff_summary(args: Value) -> Result<Value> {
             .unwrap_or_else(|| "no_extension".to_string());
         by_extension.entry(ext).or_default().push(file.clone());
     }
-    
+
     Ok(json!({
         "success": true,
         "summary": {
@@ -527,18 +588,35 @@ pub async fn diff_summary(args: Value) -> Result<Value> {
 }
 
 /// Create .agent/workflows/*.md file
+#[allow(dead_code)]
 pub async fn create_workflow(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("workflow");
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
-    let steps: Vec<String> = args.get("steps")
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("workflow");
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let steps: Vec<String> = args
+        .get("steps")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
-    
-    let workflow_dir = std::path::Path::new(repo_path).join(".agent").join("workflows");
+
+    let workflow_dir = std::path::Path::new(repo_path)
+        .join(".agent")
+        .join("workflows");
     std::fs::create_dir_all(&workflow_dir)?;
-    
+
     let mut content = format!("# {}\n\n", name);
     if !description.is_empty() {
         content.push_str(&format!("{}\n\n", description));
@@ -547,10 +625,10 @@ pub async fn create_workflow(args: Value) -> Result<Value> {
     for (i, step) in steps.iter().enumerate() {
         content.push_str(&format!("{}. {}\n", i + 1, step));
     }
-    
+
     let file_path = workflow_dir.join(format!("{}.md", name.replace(" ", "_").to_lowercase()));
     std::fs::write(&file_path, &content)?;
-    
+
     Ok(json!({
         "success": true,
         "path": file_path.to_string_lossy(),
@@ -560,27 +638,44 @@ pub async fn create_workflow(args: Value) -> Result<Value> {
 }
 
 /// Create .agent/rules/*.md file
+#[allow(dead_code)]
 pub async fn create_rule(args: Value) -> Result<Value> {
-    let repo_path = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
+    let repo_path = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
     let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("rule");
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
-    let conditions: Vec<String> = args.get("conditions")
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let conditions: Vec<String> = args
+        .get("conditions")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
-    let actions: Vec<String> = args.get("actions")
+    let actions: Vec<String> = args
+        .get("actions")
         .and_then(|v| v.as_array())
-        .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_default();
-    
+
     let rules_dir = std::path::Path::new(repo_path).join(".agent").join("rules");
     std::fs::create_dir_all(&rules_dir)?;
-    
+
     let mut content = format!("# {}\n\n", name);
     if !description.is_empty() {
         content.push_str(&format!("{}\n\n", description));
     }
-    
+
     if !conditions.is_empty() {
         content.push_str("## Conditions\n\n");
         for cond in &conditions {
@@ -588,17 +683,17 @@ pub async fn create_rule(args: Value) -> Result<Value> {
         }
         content.push('\n');
     }
-    
+
     if !actions.is_empty() {
         content.push_str("## Actions\n\n");
         for action in &actions {
             content.push_str(&format!("- {}\n", action));
         }
     }
-    
+
     let file_path = rules_dir.join(format!("{}.md", name.replace(" ", "_").to_lowercase()));
     std::fs::write(&file_path, &content)?;
-    
+
     Ok(json!({
         "success": true,
         "path": file_path.to_string_lossy(),
@@ -634,10 +729,13 @@ pub async fn clone(args: Value) -> Result<Value> {
         .output()
         .await?;
 
-    let combined = format!("{}{}",
+    let combined = format!(
+        "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    ).trim().to_string();
+    )
+    .trim()
+    .to_string();
 
     if output.status.success() {
         Ok(json!({"success": true, "url": url, "output": combined}))
@@ -647,8 +745,14 @@ pub async fn clone(args: Value) -> Result<Value> {
 }
 
 pub async fn remote(args: Value) -> Result<Value> {
-    let repo = args.get("repo_path").and_then(|v| v.as_str()).unwrap_or(".");
-    let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+    let repo = args
+        .get("repo_path")
+        .and_then(|v| v.as_str())
+        .unwrap_or(".");
+    let action = args
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("list");
     let name = args.get("name").and_then(|v| v.as_str());
     let url = args.get("url").and_then(|v| v.as_str());
 
@@ -662,7 +766,7 @@ pub async fn remote(args: Value) -> Result<Value> {
                 .await?;
             let remotes = String::from_utf8_lossy(&output.stdout).to_string();
             Ok(json!({"remotes": remotes.trim()}))
-        },
+        }
         "add" => {
             let n = name.ok_or_else(|| anyhow::anyhow!("name required for add"))?;
             let u = url.ok_or_else(|| anyhow::anyhow!("url required for add"))?;
@@ -677,7 +781,7 @@ pub async fn remote(args: Value) -> Result<Value> {
             } else {
                 Ok(json!({"error": String::from_utf8_lossy(&output.stderr).to_string()}))
             }
-        },
+        }
         "remove" => {
             let n = name.ok_or_else(|| anyhow::anyhow!("name required for remove"))?;
             let output = tokio::process::Command::new("git")
@@ -691,7 +795,7 @@ pub async fn remote(args: Value) -> Result<Value> {
             } else {
                 Ok(json!({"error": String::from_utf8_lossy(&output.stderr).to_string()}))
             }
-        },
-        _ => Ok(json!({"error": format!("Unknown action: {}. Use list, add, or remove", action)}))
+        }
+        _ => Ok(json!({"error": format!("Unknown action: {}. Use list, add, or remove", action)})),
     }
 }

@@ -14,7 +14,7 @@
 mod mcp;
 mod tools;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tracing::Level;
@@ -77,11 +77,17 @@ async fn run_serve() -> Result<()> {
             std::env::set_current_dir(&workspace).ok();
             tracing::info!("Workspace set to: {}", workspace);
         } else {
-            tracing::warn!("WORKSPACE_PATH '{}' is not a valid directory, ignoring", workspace);
+            tracing::warn!(
+                "WORKSPACE_PATH '{}' is not a valid directory, ignoring",
+                workspace
+            );
         }
     }
 
-    tracing::info!("Programmer-Wander v{} starting (stdio MCP)...", env!("CARGO_PKG_VERSION"));
+    tracing::info!(
+        "Programmer-Wander v{} starting (stdio MCP)...",
+        env!("CARGO_PKG_VERSION")
+    );
     mcp::run_stdio_server().await
 }
 
@@ -104,9 +110,9 @@ impl Target {
     fn parse(s: &str) -> Option<Vec<Target>> {
         match s {
             "claude-desktop" => Some(vec![Target::ClaudeDesktop]),
-            "claude-code"    => Some(vec![Target::ClaudeCode]),
-            "lm-studio"      => Some(vec![Target::LmStudio]),
-            "all"            => Some(Target::all().to_vec()),
+            "claude-code" => Some(vec![Target::ClaudeCode]),
+            "lm-studio" => Some(vec![Target::LmStudio]),
+            "all" => Some(Target::all().to_vec()),
             _ => None,
         }
     }
@@ -114,8 +120,8 @@ impl Target {
     fn name(&self) -> &'static str {
         match self {
             Target::ClaudeDesktop => "claude-desktop",
-            Target::ClaudeCode    => "claude-code",
-            Target::LmStudio      => "lm-studio",
+            Target::ClaudeCode => "claude-code",
+            Target::LmStudio => "lm-studio",
         }
     }
 
@@ -138,18 +144,30 @@ impl Target {
 }
 
 fn install_or_uninstall(args: &[String], remove: bool) -> Result<()> {
-    let target_str = parse_target_arg(args)
-        .context("missing required --target <host> (one of: claude-desktop, claude-code, lm-studio, all)")?;
+    let target_str = parse_target_arg(args).context(
+        "missing required --target <host> (one of: claude-desktop, claude-code, lm-studio, all)",
+    )?;
 
-    let targets = Target::parse(&target_str)
-        .with_context(|| format!("unknown target: '{}'. Valid: claude-desktop, claude-code, lm-studio, all", target_str))?;
+    let targets = Target::parse(&target_str).with_context(|| {
+        format!(
+            "unknown target: '{}'. Valid: claude-desktop, claude-code, lm-studio, all",
+            target_str
+        )
+    })?;
 
-    let exe_path = std::env::current_exe()
-        .context("could not resolve current executable path")?;
+    let exe_path = std::env::current_exe().context("could not resolve current executable path")?;
     let exe_str = exe_path.to_string_lossy().to_string();
 
     let action = if remove { "uninstall" } else { "install" };
-    println!("{} target(s): {}", action, targets.iter().map(|t| t.name()).collect::<Vec<_>>().join(", "));
+    println!(
+        "{} target(s): {}",
+        action,
+        targets
+            .iter()
+            .map(|t| t.name())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
     println!("exe path: {}", exe_str);
     println!();
 
@@ -173,7 +191,9 @@ fn install_or_uninstall(args: &[String], remove: bool) -> Result<()> {
 
     println!();
     if remove {
-        println!("Restart any host apps that had Programmer-Wander loaded for changes to take effect.");
+        println!(
+            "Restart any host apps that had Programmer-Wander loaded for changes to take effect."
+        );
     } else if any_success {
         println!("Restart any registered host apps for the new tools to appear.");
     }
@@ -206,11 +226,13 @@ fn is_skip_reason(e: &anyhow::Error) -> bool {
 }
 
 fn apply_target(target: Target, exe_path: &str, remove: bool) -> Result<String> {
-    let config_path = target.config_path()
+    let config_path = target
+        .config_path()
         .with_context(|| format!("could not resolve config path for {}", target.name()))?;
 
     // Detect: parent directory must exist (means the host app is installed)
-    let parent = config_path.parent()
+    let parent = config_path
+        .parent()
         .with_context(|| format!("config path has no parent: {}", config_path.display()))?;
 
     if !parent.exists() {
@@ -226,10 +248,13 @@ fn apply_target(target: Target, exe_path: &str, remove: bool) -> Result<String> 
             bail!("entry already absent");
         }
     } else {
-        servers_map.insert(SERVER_KEY.to_string(), json!({
-            "command": exe_path,
-            "args": []
-        }));
+        servers_map.insert(
+            SERVER_KEY.to_string(),
+            json!({
+                "command": exe_path,
+                "args": []
+            }),
+        );
     }
 
     backup_if_exists(&config_path)?;
@@ -247,12 +272,13 @@ fn read_or_init_config(path: &Path) -> Result<Value> {
     if text.trim().is_empty() {
         return Ok(json!({}));
     }
-    serde_json::from_str(&text)
-        .with_context(|| format!("invalid JSON in {}", path.display()))
+    serde_json::from_str(&text).with_context(|| format!("invalid JSON in {}", path.display()))
 }
 
 fn ensure_mcp_servers_map(config: &mut Value) -> &mut serde_json::Map<String, Value> {
-    let obj = config.as_object_mut().expect("top-level config must be a JSON object");
+    let obj = config
+        .as_object_mut()
+        .expect("top-level config must be a JSON object");
     if !obj.contains_key("mcpServers") {
         obj.insert("mcpServers".to_string(), json!({}));
     }
@@ -277,9 +303,8 @@ fn write_config_pretty(path: &Path, config: &Value) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("could not create parent dir: {}", parent.display()))?;
     }
-    let text = serde_json::to_string_pretty(config)
-        .context("failed to serialize config to JSON")?;
-    std::fs::write(path, text)
-        .with_context(|| format!("write failed: {}", path.display()))?;
+    let text =
+        serde_json::to_string_pretty(config).context("failed to serialize config to JSON")?;
+    std::fs::write(path, text).with_context(|| format!("write failed: {}", path.display()))?;
     Ok(())
 }

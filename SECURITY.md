@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-If you find a security issue in Programmer-Wander, email **josephwander@gmail.com** directly. **Do not** open a public GitHub issue.
+If you find a security issue in Programmer-Wander, use GitHub's private vulnerability reporting for this repository if available. If that is not available, email **josephwander@gmail.com** directly. **Do not** open a public GitHub issue.
 
 We aim to:
 - Acknowledge within 72 hours

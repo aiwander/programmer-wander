@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
-use tracing::{info, warn, error};
+use tracing::{error, info, warn};
 
 use crate::tools;
 
@@ -41,9 +41,9 @@ struct JsonRpcError {
 pub async fn run_stdio_server() -> Result<()> {
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout();
-    
+
     info!("MCP server ready, listening on stdio");
-    
+
     for line in stdin.lock().lines() {
         let line = match line {
             Ok(l) => l,
@@ -52,11 +52,11 @@ pub async fn run_stdio_server() -> Result<()> {
                 continue;
             }
         };
-        
+
         if line.trim().is_empty() {
             continue;
         }
-        
+
         let request: JsonRpcRequest = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
@@ -76,7 +76,7 @@ pub async fn run_stdio_server() -> Result<()> {
                 continue;
             }
         };
-        
+
         // Validate JSON-RPC 2.0 version
         if let Some(ref version) = request.jsonrpc {
             if version != "2.0" {
@@ -87,7 +87,10 @@ pub async fn run_stdio_server() -> Result<()> {
                     result: None,
                     error: Some(JsonRpcError {
                         code: -32600,
-                        message: format!("Invalid JSON-RPC version: expected '2.0', got '{}'", version),
+                        message: format!(
+                            "Invalid JSON-RPC version: expected '2.0', got '{}'",
+                            version
+                        ),
                         data: None,
                     }),
                 };
@@ -96,7 +99,7 @@ pub async fn run_stdio_server() -> Result<()> {
                 continue;
             }
         }
-        
+
         // Get method name
         let method = match &request.method {
             Some(m) => m.clone(),
@@ -105,24 +108,24 @@ pub async fn run_stdio_server() -> Result<()> {
                 continue;
             }
         };
-        
+
         // NOTIFICATIONS: Don't respond to notifications (no id, or method starts with "notifications/")
         if request.id.is_none() || method.starts_with("notifications/") {
             info!("Notification received: {} (no response)", method);
             continue;
         }
-        
+
         let response = handle_request(&method, request.id, request.params).await;
         writeln!(stdout, "{}", serde_json::to_string(&response)?)?;
         stdout.flush()?;
     }
-    
+
     Ok(())
 }
 
 async fn handle_request(method: &str, id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
     let id = id.unwrap_or(Value::Null);
-    
+
     match method {
         "initialize" => {
             info!("Initialize request received");
@@ -142,7 +145,7 @@ async fn handle_request(method: &str, id: Option<Value>, params: Option<Value>) 
                 error: None,
             }
         }
-        
+
         "tools/list" => {
             info!("Tools list requested");
             JsonRpcResponse {
@@ -154,18 +157,14 @@ async fn handle_request(method: &str, id: Option<Value>, params: Option<Value>) 
                 error: None,
             }
         }
-        
+
         "tools/call" => {
             let params = params.unwrap_or(json!({}));
-            let tool_name = params.get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let tool_args = params.get("arguments")
-                .cloned()
-                .unwrap_or(json!({}));
-            
+            let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let tool_args = params.get("arguments").cloned().unwrap_or(json!({}));
+
             info!("Tool call: {}", tool_name);
-            
+
             match tools::execute_tool(tool_name, tool_args).await {
                 Ok(result) => JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
@@ -189,19 +188,17 @@ async fn handle_request(method: &str, id: Option<Value>, params: Option<Value>) 
                         "isError": true
                     })),
                     error: None,
-                }
+                },
             }
         }
-        
-        "ping" => {
-            JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id,
-                result: Some(json!({})),
-                error: None,
-            }
-        }
-        
+
+        "ping" => JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(json!({})),
+            error: None,
+        },
+
         _ => {
             warn!("Unknown method: {}", method);
             JsonRpcResponse {

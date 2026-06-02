@@ -5,7 +5,7 @@
 **Status:** alpha. Built for [Claude Desktop](https://claude.ai/download), [Cowork](https://claude.ai/cowork), [LM Studio](https://lmstudio.ai), [Claude Code](https://claude.ai/code), and any host that speaks MCP.
 
 [![Build](https://github.com/AIWander/Programmer-Wander/actions/workflows/build.yml/badge.svg)](https://github.com/AIWander/Programmer-Wander/actions)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20x64%20%7C%20ARM64-blue.svg)](https://github.com/AIWander/Programmer-Wander/releases)
 
 ## What it does
@@ -27,6 +27,12 @@
 | **Utility** | screenshot, port_check, kill_process, list_process, archive_*, sqlite_query, md2docx, notify, clipboard_*, registry_read |
 
 ~80 tools total. No external dependencies. Single static-linked .exe. Works standalone — does not require any other MCP server.
+
+## Safety model
+
+Programmer-Wander is a powerful local dev shell. If your AI host can call it, the AI can read and write files, run shell commands, use git, call WSL, and operate on your clipboard. Install it only for AI clients you trust, and review the tools you enable.
+
+Command-entry tools (`run`, `bash`, `powershell`, `smart_exec`, `chain`, `psession_run`, `wsl_run`, and `wsl_bg`) run through `security_check_cmd` before execution. Critical destructive patterns are blocked and logged; recursive delete-style commands must target an obviously disposable path such as `target/`, `build/`, `tmp/`, or `.cache/`.
 
 ## Install
 
@@ -128,4 +134,4 @@ The two repos are independent — you can install either, both, or neither.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache 2.0. See [LICENSE](LICENSE).

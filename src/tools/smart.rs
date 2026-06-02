@@ -1,22 +1,25 @@
 //! Smart routing - Auto-picks best tool for the job
 //! Reduces tool selection errors by routing based on command/file analysis
 
+use super::{file, shell, transform};
 use anyhow::Result;
 use serde_json::{json, Value};
-use super::{shell, file, transform};
 
 /// Smart command execution - routes to best executor
 pub async fn smart_exec(args: Value) -> Result<Value> {
     let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
     let cwd = args.get("cwd").and_then(|v| v.as_str());
-    let needs_env = args.get("needs_env").and_then(|v| v.as_bool()).unwrap_or(false);
-    
+    let needs_env = args
+        .get("needs_env")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     if command.is_empty() {
         return Ok(json!({"error": "command is required"}));
     }
-    
+
     // Detect PowerShell syntax
-    let needs_powershell = command.contains("$") 
+    let needs_powershell = command.contains("$")
         || command.contains("Get-")
         || command.contains("Set-")
         || command.contains("New-Item")
@@ -27,7 +30,7 @@ pub async fn smart_exec(args: Value) -> Result<Value> {
         || command.contains("Format-Table")
         || command.contains("ConvertTo-")
         || command.contains("ConvertFrom-");
-    
+
     // Detect session needs
     let needs_session = needs_env
         || cwd.is_some()
@@ -38,9 +41,9 @@ pub async fn smart_exec(args: Value) -> Result<Value> {
         || command.contains(" && cd ")
         || command.starts_with("set ")
         || command.starts_with("export ");
-    
+
     let route: &str;
-    
+
     if needs_session {
         route = "term_session_run";
         // Ensure session exists
@@ -51,13 +54,14 @@ pub async fn smart_exec(args: Value) -> Result<Value> {
             json!({"name": session_name})
         };
         let _ = shell::create_session(create_args).await;
-        
+
         // Run in session
         let result = shell::execute(json!({
             "command": command,
             "session_id": session_name
-        })).await?;
-        
+        }))
+        .await?;
+
         return Ok(json!({
             "routed_to": route,
             "result": result
@@ -65,10 +69,12 @@ pub async fn smart_exec(args: Value) -> Result<Value> {
     } else if needs_powershell {
         route = "powershell";
         // Escape quotes and wrap for PowerShell
-        let ps_command = format!("powershell -NoProfile -Command \"{}\"", 
-            command.replace("\"", "\\\""));
+        let ps_command = format!(
+            "powershell -NoProfile -Command \"{}\"",
+            command.replace("\"", "\\\"")
+        );
         let result = shell::execute(json!({"command": ps_command})).await?;
-        
+
         return Ok(json!({
             "routed_to": route,
             "result": result
@@ -76,7 +82,7 @@ pub async fn smart_exec(args: Value) -> Result<Value> {
     } else {
         route = "term_run";
         let result = shell::execute(json!({"command": command})).await?;
-        
+
         return Ok(json!({
             "routed_to": route,
             "result": result
@@ -90,13 +96,13 @@ pub async fn smart_read(args: Value) -> Result<Value> {
     let find = args.get("find").and_then(|v| v.as_str());
     let lines = args.get("lines").and_then(|v| v.as_str());
     let compare_to = args.get("compare_to").and_then(|v| v.as_str());
-    
+
     if path.is_empty() {
         return Ok(json!({"error": "path is required"}));
     }
-    
+
     let route: &str;
-    
+
     if let Some(pattern) = find {
         // Grep mode
         route = "term_grep";
@@ -104,8 +110,9 @@ pub async fn smart_read(args: Value) -> Result<Value> {
             "path": path,
             "pattern": pattern,
             "context": 2
-        })).await?;
-        
+        }))
+        .await?;
+
         return Ok(json!({
             "routed_to": route,
             "result": result
@@ -121,8 +128,9 @@ pub async fn smart_read(args: Value) -> Result<Value> {
                 "path": path,
                 "start": start,
                 "end": end
-            })).await?;
-            
+            }))
+            .await?;
+
             return Ok(json!({
                 "routed_to": route,
                 "result": result
@@ -136,8 +144,9 @@ pub async fn smart_read(args: Value) -> Result<Value> {
         let result = transform::diff_files(json!({
             "file_a": path,
             "file_b": other
-        })).await?;
-        
+        }))
+        .await?;
+
         return Ok(json!({
             "routed_to": route,
             "result": result
@@ -146,13 +155,14 @@ pub async fn smart_read(args: Value) -> Result<Value> {
         // Default: basic file read with optional truncation
         route = "term_read_file";
         let max_kb = args.get("max_kb").and_then(|v| v.as_u64()).unwrap_or(100);
-        
+
         // Read file with size check
         let result = file::read_file(json!({
             "path": path,
             "max_bytes": max_kb * 1024
-        })).await?;
-        
+        }))
+        .await?;
+
         return Ok(json!({
             "routed_to": route,
             "result": result

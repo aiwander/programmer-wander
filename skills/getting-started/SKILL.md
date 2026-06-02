@@ -112,5 +112,5 @@ State directory: `./.programmer/` next to the exe. Fully portable.
 
 - Source: https://github.com/AIWander/Programmer-Wander
 - Releases (zip + MSI per arch): https://github.com/AIWander/Programmer-Wander/releases
-- License: MIT
+- License: Apache-2.0
 - Status: alpha (v0.1.0-alpha as of 2026-05-16)

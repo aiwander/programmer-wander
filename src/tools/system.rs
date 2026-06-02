@@ -1,34 +1,42 @@
 //! System Operations (clipboard, processes, screenshots, system info, resource monitoring)
 
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::RwLock;
-use once_cell::sync::Lazy;
 use tracing::info;
-use std::os::windows::process::CommandExt;
 
 /// Get system information
 pub async fn get_info() -> Result<Value> {
     let hostname = std::env::var("COMPUTERNAME").unwrap_or_default();
     let user = std::env::var("USERNAME").unwrap_or_default();
     let home = std::env::var("USERPROFILE").unwrap_or_default();
-    
+
     // Get memory info via PowerShell
     let mem_output = Command::new("powershell")
         .args(["-Command", "(Get-CimInstance Win32_OperatingSystem | Select-Object FreePhysicalMemory,TotalVisibleMemorySize | ConvertTo-Json)"])
         .output()
         .await
         .ok();
-    
+
     let (free_mem, total_mem) = if let Some(out) = mem_output {
         let json_str = String::from_utf8_lossy(&out.stdout);
         if let Ok(v) = serde_json::from_str::<Value>(&json_str) {
-            let free = v.get("FreePhysicalMemory").and_then(|v| v.as_u64()).unwrap_or(0) * 1024;
-            let total = v.get("TotalVisibleMemorySize").and_then(|v| v.as_u64()).unwrap_or(0) * 1024;
+            let free = v
+                .get("FreePhysicalMemory")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                * 1024;
+            let total = v
+                .get("TotalVisibleMemorySize")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0)
+                * 1024;
             (free, total)
         } else {
             (0, 0)
@@ -36,18 +44,18 @@ pub async fn get_info() -> Result<Value> {
     } else {
         (0, 0)
     };
-    
+
     // Get CPU info
     let cpu_output = Command::new("powershell")
         .args(["-Command", "(Get-CimInstance Win32_Processor).Name"])
         .output()
         .await
         .ok();
-    
+
     let cpu_name = cpu_output
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
-    
+
     Ok(json!({
         "success": true,
         "hostname": hostname,
@@ -59,8 +67,8 @@ pub async fn get_info() -> Result<Value> {
         "memory": {
             "total_bytes": total_mem,
             "free_bytes": free_mem,
-            "used_percent": if total_mem > 0 { 
-                ((total_mem - free_mem) as f64 / total_mem as f64 * 100.0).round() 
+            "used_percent": if total_mem > 0 {
+                ((total_mem - free_mem) as f64 / total_mem as f64 * 100.0).round()
             } else { 0.0 }
         },
         "server": "antigravity-rs",
@@ -78,7 +86,7 @@ pub async fn clipboard_read() -> Result<Value> {
         Err(e) => Ok(json!({
             "success": false,
             "error": format!("Clipboard read failed: {}", e)
-        }))
+        })),
     }
 }
 
@@ -94,28 +102,29 @@ pub async fn clipboard_write(args: Value) -> Result<Value> {
         Err(e) => Ok(json!({
             "success": false,
             "error": format!("Clipboard write failed: {}", e)
-        }))
+        })),
     }
 }
 
 /// List processes
 pub async fn list_processes(args: Value) -> Result<Value> {
     let filter = args.get("filter_name").and_then(|v| v.as_str());
-    
+
     let ps_cmd = if let Some(f) = filter {
         format!("Get-Process | Where-Object {{$_.Name -like '*{}*'}} | Select-Object Id,Name,CPU,WorkingSet64 -First 50 | ConvertTo-Json", f)
     } else {
-        "Get-Process | Select-Object Id,Name,CPU,WorkingSet64 -First 50 | ConvertTo-Json".to_string()
+        "Get-Process | Select-Object Id,Name,CPU,WorkingSet64 -First 50 | ConvertTo-Json"
+            .to_string()
     };
-    
+
     let output = Command::new("powershell")
         .args(["-Command", &ps_cmd])
         .output()
         .await?;
-    
+
     let json_str = String::from_utf8_lossy(&output.stdout);
     let processes: Value = serde_json::from_str(&json_str).unwrap_or(json!([]));
-    
+
     // Normalize to array (single result comes as object)
     let processes = if processes.is_array() {
         processes
@@ -124,7 +133,7 @@ pub async fn list_processes(args: Value) -> Result<Value> {
     } else {
         json!([])
     };
-    
+
     Ok(json!({
         "success": true,
         "processes": processes,
@@ -135,16 +144,16 @@ pub async fn list_processes(args: Value) -> Result<Value> {
 /// Kill process by PID
 pub async fn kill_process(args: Value) -> Result<Value> {
     let pid = args.get("pid").and_then(|v| v.as_u64()).unwrap_or(0);
-    
+
     if pid == 0 {
         anyhow::bail!("pid is required");
     }
-    
+
     let output = Command::new("taskkill")
         .args(["/PID", &pid.to_string(), "/F"])
         .output()
         .await?;
-    
+
     if output.status.success() {
         info!("Killed process {}", pid);
         Ok(json!({
@@ -159,18 +168,15 @@ pub async fn kill_process(args: Value) -> Result<Value> {
     }
 }
 
-
-
 // ============================================================================
 // RESOURCE MONITORING
 // ============================================================================
 
 /// Resource watch state
-static RESOURCE_WATCHES: Lazy<RwLock<HashMap<String, ResourceWatch>>> = 
+static RESOURCE_WATCHES: Lazy<RwLock<HashMap<String, ResourceWatch>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
 
-static RESOURCE_ALERTS: Lazy<RwLock<Vec<Value>>> = 
-    Lazy::new(|| RwLock::new(Vec::new()));
+static RESOURCE_ALERTS: Lazy<RwLock<Vec<Value>>> = Lazy::new(|| RwLock::new(Vec::new()));
 
 struct ResourceWatch {
     id: String,
@@ -187,33 +193,38 @@ pub async fn watch_resources(args: Value) -> Result<Value> {
         "disk": 95
     }));
     let interval_seconds = args["interval_seconds"].as_u64().unwrap_or(60);
-    
+
     let watch_id = format!("watch_{}", chrono::Utc::now().timestamp_millis());
     let running = Arc::new(AtomicBool::new(true));
-    
+
     // Store watch info
     {
         let mut watches = RESOURCE_WATCHES.write().await;
-        watches.insert(watch_id.clone(), ResourceWatch {
-            id: watch_id.clone(),
-            thresholds: thresholds.clone(),
-            interval_seconds,
-            running: running.clone(),
-        });
+        watches.insert(
+            watch_id.clone(),
+            ResourceWatch {
+                id: watch_id.clone(),
+                thresholds: thresholds.clone(),
+                interval_seconds,
+                running: running.clone(),
+            },
+        );
     }
-    
+
     // Spawn monitoring task
     let watch_id_clone = watch_id.clone();
     let thresholds_clone = thresholds.clone();
-    
+
     tokio::spawn(async move {
         while running.load(Ordering::SeqCst) {
             // Check resources
             if let Ok(info) = get_info().await {
                 let cpu = info["memory"]["used_percent"].as_f64().unwrap_or(0.0);
-                let mem_used = 100.0 - (info["memory"]["free_bytes"].as_f64().unwrap_or(0.0) / 
-                    info["memory"]["total_bytes"].as_f64().unwrap_or(1.0) * 100.0);
-                
+                let mem_used = 100.0
+                    - (info["memory"]["free_bytes"].as_f64().unwrap_or(0.0)
+                        / info["memory"]["total_bytes"].as_f64().unwrap_or(1.0)
+                        * 100.0);
+
                 // Check CPU threshold
                 if let Some(cpu_thresh) = thresholds_clone["cpu"].as_f64() {
                     if cpu > cpu_thresh {
@@ -225,10 +236,12 @@ pub async fn watch_resources(args: Value) -> Result<Value> {
                             "threshold": cpu_thresh,
                             "timestamp": chrono::Utc::now().to_rfc3339()
                         }));
-                        if alerts.len() > 1000 { alerts.remove(0); }
+                        if alerts.len() > 1000 {
+                            alerts.remove(0);
+                        }
                     }
                 }
-                
+
                 // Check memory threshold
                 if let Some(mem_thresh) = thresholds_clone["memory"].as_f64() {
                     if mem_used > mem_thresh {
@@ -240,15 +253,17 @@ pub async fn watch_resources(args: Value) -> Result<Value> {
                             "threshold": mem_thresh,
                             "timestamp": chrono::Utc::now().to_rfc3339()
                         }));
-                        if alerts.len() > 1000 { alerts.remove(0); }
+                        if alerts.len() > 1000 {
+                            alerts.remove(0);
+                        }
                     }
                 }
             }
-            
+
             tokio::time::sleep(tokio::time::Duration::from_secs(interval_seconds)).await;
         }
     });
-    
+
     Ok(json!({
         "success": true,
         "watch_id": watch_id,
@@ -260,9 +275,9 @@ pub async fn watch_resources(args: Value) -> Result<Value> {
 /// Stop resource watch
 pub async fn stop_resource_watch(args: Value) -> Result<Value> {
     let watch_id = args["watch_id"].as_str().unwrap_or("");
-    
+
     let mut watches = RESOURCE_WATCHES.write().await;
-    
+
     if let Some(watch) = watches.remove(watch_id) {
         watch.running.store(false, Ordering::SeqCst);
         return Ok(json!({
@@ -271,7 +286,7 @@ pub async fn stop_resource_watch(args: Value) -> Result<Value> {
             "stopped": true
         }));
     }
-    
+
     Ok(json!({
         "success": false,
         "error": format!("Watch {} not found", watch_id)
@@ -282,15 +297,16 @@ pub async fn stop_resource_watch(args: Value) -> Result<Value> {
 pub async fn get_resource_alerts(args: Value) -> Result<Value> {
     let watch_id = args["watch_id"].as_str();
     let limit = args["limit"].as_u64().unwrap_or(50) as usize;
-    
+
     let alerts = RESOURCE_ALERTS.read().await;
-    
-    let filtered: Vec<&Value> = alerts.iter()
+
+    let filtered: Vec<&Value> = alerts
+        .iter()
         .rev()
         .filter(|a| watch_id.map_or(true, |id| a["watch_id"].as_str() == Some(id)))
         .take(limit)
         .collect();
-    
+
     Ok(json!({
         "success": true,
         "alerts": filtered,
@@ -301,16 +317,19 @@ pub async fn get_resource_alerts(args: Value) -> Result<Value> {
 /// List active resource watches
 pub async fn list_resource_watches() -> Result<Value> {
     let watches = RESOURCE_WATCHES.read().await;
-    
-    let watch_list: Vec<Value> = watches.values()
-        .map(|w| json!({
-            "watch_id": w.id,
-            "thresholds": w.thresholds,
-            "interval_seconds": w.interval_seconds,
-            "running": w.running.load(Ordering::SeqCst)
-        }))
+
+    let watch_list: Vec<Value> = watches
+        .values()
+        .map(|w| {
+            json!({
+                "watch_id": w.id,
+                "thresholds": w.thresholds,
+                "interval_seconds": w.interval_seconds,
+                "running": w.running.load(Ordering::SeqCst)
+            })
+        })
         .collect();
-    
+
     Ok(json!({
         "success": true,
         "watches": watch_list,
@@ -320,15 +339,22 @@ pub async fn list_resource_watches() -> Result<Value> {
 
 /// Test TCP connectivity to a host:port
 pub async fn port_check(args: Value) -> Result<Value> {
-    let host = args.get("host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1");
+    let host = args
+        .get("host")
+        .and_then(|v| v.as_str())
+        .unwrap_or("127.0.0.1");
     let port = match args.get("port").and_then(|v| v.as_u64()) {
         Some(p) => p as u16,
         None => anyhow::bail!("port required"),
     };
-    let timeout_ms = args.get("timeout_ms").and_then(|v| v.as_u64()).unwrap_or(2000);
+    let timeout_ms = args
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(2000);
 
     let addr = format!("{}:{}", host, port);
-    let socket_addr: std::net::SocketAddr = addr.parse()
+    let socket_addr: std::net::SocketAddr = addr
+        .parse()
         .map_err(|e| anyhow::anyhow!("Invalid address {}: {}", addr, e))?;
 
     let timeout_dur = std::time::Duration::from_millis(timeout_ms);
@@ -346,7 +372,7 @@ pub async fn port_check(args: Value) -> Result<Value> {
                     "port": port,
                     "connect_time_ms": elapsed_ms,
                 }))
-            },
+            }
             Err(e) => {
                 let elapsed_ms = start.elapsed().as_millis();
                 Ok(json!({
@@ -358,7 +384,8 @@ pub async fn port_check(args: Value) -> Result<Value> {
                 }))
             }
         }
-    }).await?
+    })
+    .await?
 }
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -372,7 +399,10 @@ pub fn tail_file(args: &Value) -> Value {
         None => return json!({"error": "Missing 'path' parameter"}),
     };
     let max_lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(50) as usize;
-    let since_bytes = args.get("since_bytes").and_then(|v| v.as_u64()).unwrap_or(0);
+    let since_bytes = args
+        .get("since_bytes")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
 
     let mut file = match std::fs::File::open(path) {
         Ok(f) => f,
@@ -439,10 +469,22 @@ pub fn tail_file(args: &Value) -> Value {
 
 /// Show a silent Windows toast notification
 pub fn notify(args: &Value) -> Value {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let body = args
+        .get("body")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     let icon = args.get("icon").and_then(|v| v.as_str()).unwrap_or("info");
-    let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(5000).max(1);
+    let duration_ms = args
+        .get("duration_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(5000)
+        .max(1);
 
     if title.is_empty() || body.is_empty() {
         return json!({"error": "Both title and body are required"});
@@ -544,14 +586,16 @@ pub fn screenshot(args: &Value) -> Value {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let path = save_path.map(String::from)
+    let path = save_path
+        .map(String::from)
         .unwrap_or_else(|| format!("C:\\temp\\screenshot_{}.jpg", timestamp));
 
     if let Some(parent) = std::path::Path::new(&path).parent() {
         let _ = std::fs::create_dir_all(parent);
     }
 
-    let ps_script = format!(r#"
+    let ps_script = format!(
+        r#"
 Add-Type -AssemblyName System.Windows.Forms,System.Drawing
 $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 $bitmap = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
@@ -567,7 +611,11 @@ $ep = New-Object System.Drawing.Imaging.EncoderParameters(1)
 $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter([System.Drawing.Imaging.Encoder]::Quality, {quality})
 $scaled.Save('{path}', $enc, $ep)
 $scaled.Dispose(); $bitmap.Dispose()
-"#, scale = scale, quality = quality, path = path.replace('\\', "\\\\"));
+"#,
+        scale = scale,
+        quality = quality,
+        path = path.replace('\\', "\\\\")
+    );
 
     let output = std::process::Command::new("powershell")
         .args(["-NoProfile", "-Command", &ps_script])

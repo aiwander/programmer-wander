@@ -1,14 +1,15 @@
 //! Persistent Shell Sessions - real process persistence across calls
 //! Supports PowerShell and WSL (bash) backends
 
+use super::security;
 use anyhow::Result;
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
-use std::io::{BufRead, BufReader, Write};
 use std::thread;
-use once_cell::sync::Lazy;
 use tracing::info;
 
 #[cfg(windows)]
@@ -38,10 +39,19 @@ fn start_reader(stream: impl std::io::Read + Send + 'static, buffer: Arc<Mutex<V
 }
 
 pub async fn create(args: Value) -> Result<Value> {
-    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("default");
-    let shell = args.get("shell").and_then(|v| v.as_str()).unwrap_or("powershell");
+    let name = args
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("default");
+    let shell = args
+        .get("shell")
+        .and_then(|v| v.as_str())
+        .unwrap_or("powershell");
     let default_cwd = std::env::var("WORKSPACE_PATH").unwrap_or_else(|_| "C:\\".to_string());
-    let cwd = args.get("cwd").and_then(|v| v.as_str()).unwrap_or(&default_cwd);
+    let cwd = args
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&default_cwd);
 
     info!("Creating persistent {} session: {}", shell, name);
 
@@ -50,7 +60,7 @@ pub async fn create(args: Value) -> Result<Value> {
             let mut c = Command::new("wsl");
             c.args(["-d", "Ubuntu-24.04", "--", "bash"]);
             c
-        },
+        }
         _ => {
             let mut c = Command::new("powershell");
             c.args(["-NoLogo", "-NoProfile", "-Command", "-"]);
@@ -66,10 +76,13 @@ pub async fn create(args: Value) -> Result<Value> {
     #[cfg(windows)]
     cmd.creation_flags(CREATE_NO_WINDOW);
 
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to spawn {}: {}", shell, e))?;
 
-    let stdout = child.stdout.take()
+    let stdout = child
+        .stdout
+        .take()
         .ok_or_else(|| anyhow::anyhow!("Failed to take stdout"))?;
 
     let buffer = Arc::new(Mutex::new(Vec::new()));
@@ -86,14 +99,17 @@ pub async fn create(args: Value) -> Result<Value> {
     let created = chrono::Local::now().to_rfc3339();
 
     let mut sessions = PSESSIONS.lock().unwrap();
-    sessions.insert(session_id.clone(), PersistentSession {
-        name: name.to_string(),
-        shell_type: shell.to_string(),
-        child,
-        output_buffer: buffer,
-        history: Vec::new(),
-        created_at: created.clone(),
-    });
+    sessions.insert(
+        session_id.clone(),
+        PersistentSession {
+            name: name.to_string(),
+            shell_type: shell.to_string(),
+            child,
+            output_buffer: buffer,
+            history: Vec::new(),
+            created_at: created.clone(),
+        },
+    );
 
     Ok(json!({
         "session_id": session_id,
@@ -104,26 +120,48 @@ pub async fn create(args: Value) -> Result<Value> {
 }
 
 pub async fn run(args: Value) -> Result<Value> {
-    let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    let timeout_secs = args.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(30);
+    let timeout_secs = args
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30);
 
     if session_id.is_empty() || command.is_empty() {
         anyhow::bail!("session_id and command are required");
     }
 
-    info!("psession_run [{}]: {}", session_id, &command[..command.len().min(80)]);
+    let safety_warning = security::enforce_command_safety(command)?;
+
+    info!(
+        "psession_run [{}]: {}",
+        session_id,
+        &command[..command.len().min(80)]
+    );
 
     let mut sessions = PSESSIONS.lock().unwrap();
-    let session = sessions.get_mut(session_id)
+    let session = sessions
+        .get_mut(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
 
     // Record pre-command buffer position
     let start_pos = session.output_buffer.lock().unwrap().len();
 
     // Write command to stdin
-    let marker = format!("__DONE_{}__", uuid::Uuid::new_v4().to_string().get(..8).unwrap_or("00000000"));
-    let stdin = session.child.stdin.as_mut()
+    let marker = format!(
+        "__DONE_{}__",
+        uuid::Uuid::new_v4()
+            .to_string()
+            .get(..8)
+            .unwrap_or("00000000")
+    );
+    let stdin = session
+        .child
+        .stdin
+        .as_mut()
         .ok_or_else(|| anyhow::anyhow!("stdin not available"))?;
 
     let full_cmd = if session.shell_type == "wsl" {
@@ -132,9 +170,11 @@ pub async fn run(args: Value) -> Result<Value> {
         format!("{}\nWrite-Output '{}'\n", command, marker)
     };
 
-    stdin.write_all(full_cmd.as_bytes())
+    stdin
+        .write_all(full_cmd.as_bytes())
         .map_err(|e| anyhow::anyhow!("Write failed: {}", e))?;
-    stdin.flush()
+    stdin
+        .flush()
         .map_err(|e| anyhow::anyhow!("Flush failed: {}", e))?;
 
     session.history.push(command.to_string());
@@ -165,7 +205,9 @@ pub async fn run(args: Value) -> Result<Value> {
                         break;
                     }
                 }
-                if found_marker { break; }
+                if found_marker {
+                    break;
+                }
             }
         }
 
@@ -185,12 +227,16 @@ pub async fn run(args: Value) -> Result<Value> {
         "output": output_lines.join("\n"),
         "lines": output_lines.len(),
         "completed": found_marker,
-        "timed_out": !found_marker
+        "timed_out": !found_marker,
+        "safety_warning": safety_warning
     }))
 }
 
 pub async fn destroy(args: Value) -> Result<Value> {
-    let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if session_id.is_empty() {
         anyhow::bail!("session_id is required");
     }
@@ -206,22 +252,28 @@ pub async fn destroy(args: Value) -> Result<Value> {
 
 pub async fn list(_args: Value) -> Result<Value> {
     let sessions = PSESSIONS.lock().unwrap();
-    let list: Vec<Value> = sessions.iter().map(|(id, s)| {
-        json!({
-            "session_id": id,
-            "name": s.name,
-            "shell": s.shell_type,
-            "history_count": s.history.len(),
-            "buffer_lines": s.output_buffer.lock().unwrap().len(),
-            "created_at": s.created_at,
+    let list: Vec<Value> = sessions
+        .iter()
+        .map(|(id, s)| {
+            json!({
+                "session_id": id,
+                "name": s.name,
+                "shell": s.shell_type,
+                "history_count": s.history.len(),
+                "buffer_lines": s.output_buffer.lock().unwrap().len(),
+                "created_at": s.created_at,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(json!({"sessions": list, "count": list.len()}))
 }
 
 pub async fn read_output(args: Value) -> Result<Value> {
-    let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let tail_n = args.get("tail").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
     if session_id.is_empty() {
@@ -229,7 +281,8 @@ pub async fn read_output(args: Value) -> Result<Value> {
     }
 
     let sessions = PSESSIONS.lock().unwrap();
-    let session = sessions.get(session_id)
+    let session = sessions
+        .get(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
 
     let buf = session.output_buffer.lock().unwrap();
@@ -244,13 +297,17 @@ pub async fn read_output(args: Value) -> Result<Value> {
 }
 
 pub async fn history(args: Value) -> Result<Value> {
-    let session_id = args.get("session_id").and_then(|v| v.as_str()).unwrap_or("");
+    let session_id = args
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if session_id.is_empty() {
         anyhow::bail!("session_id is required");
     }
 
     let sessions = PSESSIONS.lock().unwrap();
-    let session = sessions.get(session_id)
+    let session = sessions
+        .get(session_id)
         .ok_or_else(|| anyhow::anyhow!("Session not found: {}", session_id))?;
 
     Ok(json!({

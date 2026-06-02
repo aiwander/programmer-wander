@@ -1,15 +1,17 @@
 //! Infrastructure tools - process listing and project preflight checks.
 //! Generic versions for any user (no CPC-specific paths).
 
-use serde_json::{json, Value};
 use anyhow::Result;
+use serde_json::{json, Value};
 use std::process::Stdio;
 
 async fn run_ps(cmd: &str) -> String {
     match tokio::process::Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", cmd])
-        .stdout(Stdio::piped()).stderr(Stdio::piped())
-        .output().await
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
     {
         Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
         Err(e) => format!("error: {}", e),
@@ -25,15 +27,20 @@ pub async fn server_health(args: Value) -> Result<Value> {
     let parsed: Value = serde_json::from_str(&output).unwrap_or(json!({"raw": output}));
 
     if let Some(filter) = name_filter {
-        let names: Vec<String> = filter.iter()
+        let names: Vec<String> = filter
+            .iter()
             .filter_map(|v| v.as_str().map(|s| s.to_lowercase()))
             .collect();
         if let Some(arr) = parsed.as_array() {
-            let filtered: Vec<&Value> = arr.iter().filter(|p| {
-                p["ProcessName"].as_str()
-                    .map(|n| names.iter().any(|f| n.to_lowercase().contains(f)))
-                    .unwrap_or(false)
-            }).collect();
+            let filtered: Vec<&Value> = arr
+                .iter()
+                .filter(|p| {
+                    p["ProcessName"]
+                        .as_str()
+                        .map(|n| names.iter().any(|f| n.to_lowercase().contains(f)))
+                        .unwrap_or(false)
+                })
+                .collect();
             return Ok(json!({"processes": filtered}));
         }
     }

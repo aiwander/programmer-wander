@@ -1,8 +1,9 @@
 //! WSL tools - Run commands and background jobs in WSL
 //! Background jobs stay alive because programmer.exe holds the child process handle
 
-use serde_json::{json, Value};
+use super::security;
 use anyhow::Result;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -29,22 +30,35 @@ fn get_jobs() -> std::sync::MutexGuard<'static, Option<HashMap<String, WslJob>>>
 }
 
 fn gen_job_id() -> String {
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     format!("wsl_{}", ts)
 }
 
 pub async fn run(args: Value) -> Result<Value> {
     let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("");
-    let timeout = args.get("timeout_secs").and_then(|v| v.as_u64()).unwrap_or(120);
+    let timeout = args
+        .get("timeout_secs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(120);
 
     if command.is_empty() {
         anyhow::bail!("command is required");
     }
 
+    let safety_warning = security::enforce_command_safety(command)?;
+
     info!("WSL run: {}", &command[..command.len().min(80)]);
 
-    let log_path = format!("C:\\temp\\wsl_run_{}.log",
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs());
+    let log_path = format!(
+        "C:\\temp\\wsl_run_{}.log",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
 
     let start = Instant::now();
 
@@ -54,8 +68,9 @@ pub async fn run(args: Value) -> Result<Value> {
             .args(["-d", "Ubuntu-24.04", "--", "bash", "-c", command])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
-    ).await;
+            .output(),
+    )
+    .await;
 
     let duration = start.elapsed().as_secs();
 
@@ -75,9 +90,10 @@ pub async fn run(args: Value) -> Result<Value> {
                 "duration_secs": duration,
                 "total_lines": line_count,
                 "log": log_path,
-                "tail": tail.join("\n")
+                "tail": tail.join("\n"),
+                "safety_warning": safety_warning
             }))
-        },
+        }
         Ok(Err(e)) => Ok(json!({"error": format!("WSL launch failed: {}", e)})),
         Err(_) => Ok(json!({"error": format!("Timed out after {}s", timeout)})),
     }
@@ -89,7 +105,10 @@ pub async fn bg(args: Value) -> Result<Value> {
         anyhow::bail!("command is required");
     }
 
-    let job_id = args.get("job_name")
+    let safety_warning = security::enforce_command_safety(command)?;
+
+    let job_id = args
+        .get("job_name")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(gen_job_id);
@@ -113,12 +132,15 @@ pub async fn bg(args: Value) -> Result<Value> {
             let pid = child.id();
             let mut jobs = get_jobs();
             if let Some(ref mut map) = *jobs {
-                map.insert(job_id.clone(), WslJob {
-                    pid,
-                    log_file: log_file.clone(),
-                    status_file: status_file.clone(),
-                    started: Instant::now(),
-                });
+                map.insert(
+                    job_id.clone(),
+                    WslJob {
+                        pid,
+                        log_file: log_file.clone(),
+                        status_file: status_file.clone(),
+                        started: Instant::now(),
+                    },
+                );
             }
 
             let sf = status_file.clone();
@@ -131,7 +153,10 @@ pub async fn bg(args: Value) -> Result<Value> {
                     Err(_) => -1,
                 };
                 let status = if exit == 0 { "done" } else { "failed" };
-                let _ = fs::write(&sf, format!(r#"{{"status":"{}","exit_code":{}}}"#, status, exit));
+                let _ = fs::write(
+                    &sf,
+                    format!(r#"{{"status":"{}","exit_code":{}}}"#, status, exit),
+                );
                 if let Ok(mut jobs) = JOBS.lock() {
                     if let Some(ref mut map) = *jobs {
                         map.remove(&jid);
@@ -144,11 +169,15 @@ pub async fn bg(args: Value) -> Result<Value> {
                 "pid": pid,
                 "log": log_file,
                 "status_file": status_file,
-                "poll": format!("wsl_status(job_id='{}')", job_id)
+                "poll": format!("wsl_status(job_id='{}')", job_id),
+                "safety_warning": safety_warning
             }))
         }
         Err(e) => {
-            let _ = fs::write(&status_file, format!(r#"{{"status":"failed","error":"{}"}}"#, e));
+            let _ = fs::write(
+                &status_file,
+                format!(r#"{{"status":"failed","error":"{}"}}"#, e),
+            );
             Ok(json!({"error": format!("WSL spawn failed: {}", e)}))
         }
     }
@@ -171,6 +200,7 @@ pub async fn status(args: Value) -> Result<Value> {
                 result.push(json!({
                     "job_id": id,
                     "pid": job.pid,
+                    "log": job.log_file,
                     "elapsed_secs": job.started.elapsed().as_secs(),
                     "status": st,
                 }));
@@ -180,8 +210,13 @@ pub async fn status(args: Value) -> Result<Value> {
             for entry in entries.flatten() {
                 let name = entry.file_name().to_string_lossy().to_string();
                 if name.starts_with("wsl_bg_") && name.ends_with(".status") {
-                    let jid = name.trim_start_matches("wsl_bg_").trim_end_matches(".status");
-                    if !result.iter().any(|r| r.get("job_id").and_then(|v| v.as_str()) == Some(jid)) {
+                    let jid = name
+                        .trim_start_matches("wsl_bg_")
+                        .trim_end_matches(".status");
+                    if !result
+                        .iter()
+                        .any(|r| r.get("job_id").and_then(|v| v.as_str()) == Some(jid))
+                    {
                         let st = fs::read_to_string(entry.path()).unwrap_or_default();
                         result.push(json!({"job_id": jid, "status": st, "completed": true}));
                     }
@@ -200,15 +235,24 @@ pub async fn status(args: Value) -> Result<Value> {
     let tail = if Path::new(&log_file).exists() {
         let content = fs::read_to_string(&log_file).unwrap_or_default();
         let lines: Vec<&str> = content.lines().collect();
-        let start = if lines.len() > tail_n { lines.len() - tail_n } else { 0 };
+        let start = if lines.len() > tail_n {
+            lines.len() - tail_n
+        } else {
+            0
+        };
         lines[start..].join("\n")
     } else {
         String::new()
     };
 
     let total_lines = if Path::new(&log_file).exists() {
-        fs::read_to_string(&log_file).unwrap_or_default().lines().count()
-    } else { 0 };
+        fs::read_to_string(&log_file)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    } else {
+        0
+    };
 
     Ok(json!({
         "job_id": job_id,
@@ -233,7 +277,10 @@ pub async fn log_output(args: Value) -> Result<Value> {
     let lines: Vec<&str> = content.lines().collect();
     let total = lines.len();
 
-    let range = args.get("lines").and_then(|v| v.as_str()).unwrap_or("last:50");
+    let range = args
+        .get("lines")
+        .and_then(|v| v.as_str())
+        .unwrap_or("last:50");
 
     let (start, end) = if range.starts_with("last:") {
         let n: usize = range.trim_start_matches("last:").parse().unwrap_or(50);

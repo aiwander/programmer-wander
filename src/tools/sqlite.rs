@@ -16,7 +16,10 @@ pub async fn query(args: Value) -> Result<Value> {
 
     // Safety: only allow SELECT and PRAGMA
     let sql_upper = sql.trim().to_uppercase();
-    if !sql_upper.starts_with("SELECT") && !sql_upper.starts_with("PRAGMA") && !sql_upper.starts_with("EXPLAIN") {
+    if !sql_upper.starts_with("SELECT")
+        && !sql_upper.starts_with("PRAGMA")
+        && !sql_upper.starts_with("EXPLAIN")
+    {
         anyhow::bail!("Only SELECT, PRAGMA, and EXPLAIN queries are allowed (read-only)");
     }
 
@@ -28,35 +31,43 @@ pub async fn query(args: Value) -> Result<Value> {
         let conn = rusqlite::Connection::open_with_flags(
             &db_path_owned,
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        ).map_err(|e| anyhow::anyhow!("Cannot open {}: {}", db_path_owned, e))?;
+        )
+        .map_err(|e| anyhow::anyhow!("Cannot open {}: {}", db_path_owned, e))?;
 
-        let mut stmt = conn.prepare(&sql_owned)
+        let mut stmt = conn
+            .prepare(&sql_owned)
             .map_err(|e| anyhow::anyhow!("SQL error: {}", e))?;
 
         let column_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let column_count = column_names.len();
 
         let mut rows = Vec::new();
-        let result = stmt.query_map([], |row| {
-            let mut obj = serde_json::Map::new();
-            for i in 0..column_count {
-                let val: Value = match row.get_ref(i) {
-                    Ok(rusqlite::types::ValueRef::Null) => Value::Null,
-                    Ok(rusqlite::types::ValueRef::Integer(n)) => json!(n),
-                    Ok(rusqlite::types::ValueRef::Real(f)) => json!(f),
-                    Ok(rusqlite::types::ValueRef::Text(s)) => {
-                        json!(std::str::from_utf8(s).unwrap_or("<invalid utf8>"))
-                    },
-                    Ok(rusqlite::types::ValueRef::Blob(b)) => json!(format!("<blob {} bytes>", b.len())),
-                    Err(_) => Value::Null,
-                };
-                obj.insert(column_names[i].clone(), val);
-            }
-            Ok(Value::Object(obj))
-        }).map_err(|e| anyhow::anyhow!("Query execution failed: {}", e))?;
+        let result = stmt
+            .query_map([], |row| {
+                let mut obj = serde_json::Map::new();
+                for i in 0..column_count {
+                    let val: Value = match row.get_ref(i) {
+                        Ok(rusqlite::types::ValueRef::Null) => Value::Null,
+                        Ok(rusqlite::types::ValueRef::Integer(n)) => json!(n),
+                        Ok(rusqlite::types::ValueRef::Real(f)) => json!(f),
+                        Ok(rusqlite::types::ValueRef::Text(s)) => {
+                            json!(std::str::from_utf8(s).unwrap_or("<invalid utf8>"))
+                        }
+                        Ok(rusqlite::types::ValueRef::Blob(b)) => {
+                            json!(format!("<blob {} bytes>", b.len()))
+                        }
+                        Err(_) => Value::Null,
+                    };
+                    obj.insert(column_names[i].clone(), val);
+                }
+                Ok(Value::Object(obj))
+            })
+            .map_err(|e| anyhow::anyhow!("Query execution failed: {}", e))?;
 
         for row in result {
-            if rows.len() >= max_rows { break; }
+            if rows.len() >= max_rows {
+                break;
+            }
             if let Ok(val) = row {
                 rows.push(val);
             }
@@ -70,5 +81,6 @@ pub async fn query(args: Value) -> Result<Value> {
             "db_path": db_path_owned,
             "truncated": truncated
         }))
-    }).await?
+    })
+    .await?
 }

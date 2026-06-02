@@ -1,30 +1,30 @@
 //! Tool Registry and Dispatch
 // NAV: TOC at line 1098 | 2 fn | 0 struct | 2026-04-08
 
+mod config;
 mod file;
-mod shell;
-mod system;
-mod search;
 mod git;
 mod http;
-mod webhook;
-mod transform;
-mod config;
-mod smart;
-mod wsl;
+mod infra;
 mod planner;
 mod psession;
-mod security;
-mod infra;
-mod sqlite;
 mod registry;
+mod search;
+mod security;
+mod shell;
+mod smart;
+mod sqlite;
+mod system;
+mod transform;
+mod webhook;
+mod wsl;
 
 use anyhow::Result;
 use serde_json::{json, Value};
 
 /// Get all tool definitions for MCP tools/list
 pub fn get_tool_definitions() -> Vec<Value> {
-    let mut defs = vec![
+    let defs = vec![
         // ============ FILE OPERATIONS ============
         json!({
             "name": "read_file",
@@ -128,7 +128,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["path"]
             }
         }),
-        
         // ============ SHELL EXECUTION ============
         json!({
             "name": "bash",
@@ -284,7 +283,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["checkpoint_path"]
             }
         }),
-        
         // ============ SEARCH ============
         json!({
             "name": "search_start",
@@ -315,7 +313,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["path", "pattern"]
             }
         }),
-        
         // ============ SYSTEM ============
         json!({
             "name": "screenshot",
@@ -371,8 +368,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["pid"]
             }
         }),
-        
-        
         // ============ GIT ============
         json!({
             "name": "git_status",
@@ -489,7 +484,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 }
             }
         }),
-        
         // ============ HTTP ============
         json!({
             "name": "http_request",
@@ -518,7 +512,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["url", "destination"]
             }
         }),
-        
         // ============ WEBHOOKS ============
         json!({
             "name": "webhook_start",
@@ -561,7 +554,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["server_id", "path", "action"]
             }
         }),
-        
         // ============ TRANSFORM ============
         json!({
             "name": "archive_create",
@@ -644,7 +636,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["pattern", "transform_code"]
             }
         }),
-        
         // ============ TOKEN-SAVING TRANSFORMS (ported from mcp-windows) ============
         json!({
             "name": "transform_json_format",
@@ -794,7 +785,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["template", "name"]
             }
         }),
-        
         // ============ SMART ROUTING ============
         json!({
             "name": "smart_exec",
@@ -824,8 +814,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "required": ["path"]
             }
         }),
-        
-        
         // ============ MCP CONFIG & IDE ============
         json!({
             "name": "config_validate_mcp",
@@ -837,7 +825,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 }
             }
         }),
-        
         // ============ RESOURCE MONITORING ============
         json!({
             "name": "watch_resource",
@@ -880,7 +867,6 @@ pub fn get_tool_definitions() -> Vec<Value> {
                 "properties": {}
             }
         }),
-        
         // ============ RECOVERY ============
         json!({
             "name": "session_recovery_status",
@@ -966,7 +952,7 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "get_file_info" | "term_get_file_info" => file::get_file_info(args).await,
         "create_dir" | "term_create_directory" => file::create_directory(args).await,
         "list_dir" | "term_list_directory" => file::list_directory(args).await,
-        
+
         // Shell
         "bash" | "run" | "term_run" => shell::execute(args).await,
         "chain" | "term_chain" => shell::chain(args).await,
@@ -980,11 +966,15 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "shortcut" | "term_shortcut" => shell::shortcut(args).await,
         "list_shortcut" | "term_list_shortcuts" => shell::list_shortcuts().await,
         "session_checkpoint" | "term_session_checkpoint" => shell::session_checkpoint(args).await,
-        "session_recover" | "term_session_recover_file" => shell::session_recover_from_file(args).await,
-        
+        "session_recover" | "term_session_recover_file" => {
+            shell::session_recover_from_file(args).await
+        }
+
         // Search
-        "search_start" | "search_file" | "term_start_search" | "search_files" => search::search(args).await,
-        
+        "search_start" | "search_file" | "term_start_search" | "search_files" => {
+            search::search(args).await
+        }
+
         // System
         "screenshot" => Ok(system::screenshot(&args)),
         "system_info" | "term_get_system_info" => system::get_info().await,
@@ -992,9 +982,9 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "clipboard_write" | "term_clipboard_write" => system::clipboard_write(args).await,
         "list_process" | "term_list_processes" => system::list_processes(args).await,
         "kill_process" | "term_kill_process" => system::kill_process(args).await,
-        
+
         // Browser
-        
+
         // Git
         "git_status" | "term_git_status" => git::status(args).await,
         "git_diff" | "term_git_diff" => git::diff(args).await,
@@ -1005,17 +995,17 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "git_branch" | "term_git_branch" => git::branch(args).await,
         "git_checkout" | "term_git_checkout" => git::checkout(args).await,
         "git_stash" | "term_git_stash" => git::stash(args).await,
-        "git_diff_summary" | "term_git_diff_summary" => git::diff_summary(args).await,        
+        "git_diff_summary" | "term_git_diff_summary" => git::diff_summary(args).await,
         // HTTP
         "http_request" | "term_http_request" => http::request(args).await,
         "http_download" | "term_download_file" => http::download(args).await,
-        
+
         // Webhooks
         "webhook_start" | "term_webhook_server" => webhook::start_webhook_server(args).await,
         "webhook_stop" | "term_stop_webhook" => webhook::stop_webhook_server(args).await,
         "webhook_list" | "term_list_webhooks" => webhook::list_webhook_servers().await,
         "webhook_add_route" | "term_add_webhook_route" => webhook::add_webhook_route(args).await,
-        
+
         // Transform
         "archive_create" | "term_archive" => transform::archive(args).await,
         "archive_extract" | "term_extract" => transform::extract(args).await,
@@ -1023,7 +1013,7 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "transform_sync_dir" | "term_sync_directories" => transform::sync_directories(args).await,
         "diff_file" | "term_diff_files" => transform::diff_files(args).await,
         "transform_file" | "term_transform_files" => transform::transform_files(args).await,
-        
+
         // MCP Config & IDE
         "transform_json_format" | "term_json_format" => transform::json_format(args).await,
         "transform_json_minify" | "term_json_minify" => transform::json_minify(args).await,
@@ -1037,19 +1027,21 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "extract_lines" | "term_extract_lines" => transform::extract_lines(args).await,
         "grep" | "term_grep" => transform::grep(args).await,
         "transform_scaffold" | "term_scaffold" => transform::scaffold(args).await,
-        
+
         // Smart routing
         "smart_exec" | "term_smart_exec" => smart::smart_exec(args).await,
         "smart_read" | "term_smart_read" => smart::smart_read(args).await,
-        
+
         // MCP Config & IDE
-        "config_validate_mcp" | "term_validate_mcp_config" => config::validate_mcp_config(args).await,        
+        "config_validate_mcp" | "term_validate_mcp_config" => {
+            config::validate_mcp_config(args).await
+        }
         // Resource Monitoring
         "watch_resource" | "term_watch_resources" => system::watch_resources(args).await,
         "stop_watch" | "term_stop_watch" => system::stop_resource_watch(args).await,
         "get_alert" | "term_get_alerts" => system::get_resource_alerts(args).await,
         "list_watch" | "term_list_watches" => system::list_resource_watches().await,
-        
+
         // Config & Recovery
         "config_get" | "term_get_config" => config::get_config().await,
         "config_set" | "term_set_config" => config::set_config(args).await,
@@ -1060,7 +1052,7 @@ pub async fn execute_tool(name: &str, args: Value) -> Result<Value> {
         "session_recover_data" | "term_recover_session" => config::recover_session(args).await,
         "session_resume_op" | "term_resume_operation" => config::resume_operation(args).await,
         "session_clear_recovery" | "term_clear_recovery" => config::clear_recovery().await,
-        
+
         "powershell" => shell::powershell(args).await,
         "md2docx" => shell::md2docx(args).await,
         "git_clone" | "term_git_clone" => git::clone(args).await,

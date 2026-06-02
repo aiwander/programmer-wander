@@ -1,6 +1,7 @@
 use serde_json::{json, Map, Value};
 use winreg::{enums::*, RegKey, RegValue};
 
+#[allow(dead_code)]
 pub fn get_definitions() -> Vec<Value> {
     vec![json!({
         "name": "registry_read",
@@ -25,9 +26,16 @@ pub fn execute(name: &str, args: &Value) -> Value {
 }
 
 fn registry_read(args: &Value) -> Value {
-    let key_path = args.get("key").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let key_path = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     let value_name = args.get("value_name").and_then(|v| v.as_str());
-    let recursive = args.get("recursive").and_then(|v| v.as_bool()).unwrap_or(false);
+    let recursive = args
+        .get("recursive")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if key_path.is_empty() {
         return json!({"error": "Missing 'key' parameter"});
     }
@@ -43,7 +51,12 @@ fn registry_read(args: &Value) -> Value {
 fn open_allowed_key(key_path: &str) -> Result<(RegKey, String), String> {
     let normalized = key_path.trim().replace('/', "\\");
     let upper = normalized.to_uppercase();
-    for blocked in ["HKLM\\SAM", "HKLM\\SECURITY", "HKEY_LOCAL_MACHINE\\SAM", "HKEY_LOCAL_MACHINE\\SECURITY"] {
+    for blocked in [
+        "HKLM\\SAM",
+        "HKLM\\SECURITY",
+        "HKEY_LOCAL_MACHINE\\SAM",
+        "HKEY_LOCAL_MACHINE\\SECURITY",
+    ] {
         if upper == blocked || upper.starts_with(&(blocked.to_string() + "\\")) {
             return Err("Access denied to protected registry hives".to_string());
         }
@@ -67,7 +80,9 @@ fn open_allowed_key(key_path: &str) -> Result<(RegKey, String), String> {
         || subkey.to_uppercase().starts_with("ENVIRONMENT\\");
     let hkcu = upper.starts_with("HKCU\\") || upper.starts_with("HKEY_CURRENT_USER\\");
     let hklm = upper.starts_with("HKLM\\") || upper.starts_with("HKEY_LOCAL_MACHINE\\");
-    if !(hklm && (subkey.eq_ignore_ascii_case("SOFTWARE") || subkey.to_uppercase().starts_with("SOFTWARE\\")))
+    if !(hklm
+        && (subkey.eq_ignore_ascii_case("SOFTWARE")
+            || subkey.to_uppercase().starts_with("SOFTWARE\\")))
         && !(hkcu && allowed)
     {
         return Err("Registry path outside whitelist: allow HKLM\\SOFTWARE, HKCU\\SOFTWARE, HKCU\\Environment".to_string());
@@ -87,7 +102,9 @@ fn snapshot_key(key: &RegKey, key_path: &str, value_name: Option<&str>, recursiv
                 out.insert("value_name".to_string(), json!(display_name(name)));
                 out.insert("value".to_string(), format_value(&value));
             }
-            Err(err) => return json!({"key": key_path, "value_name": display_name(name), "error": err.to_string()}),
+            Err(err) => {
+                return json!({"key": key_path, "value_name": display_name(name), "error": err.to_string()})
+            }
         }
     } else {
         out.insert("values".to_string(), read_values(key));
@@ -132,8 +149,12 @@ fn read_values(key: &RegKey) -> Value {
 
 fn format_value(value: &RegValue) -> Value {
     let data = match value.vtype {
-        REG_DWORD if value.bytes.len() >= 4 => json!(u32::from_le_bytes(value.bytes[..4].try_into().unwrap())),
-        REG_QWORD if value.bytes.len() >= 8 => json!(u64::from_le_bytes(value.bytes[..8].try_into().unwrap())),
+        REG_DWORD if value.bytes.len() >= 4 => {
+            json!(u32::from_le_bytes(value.bytes[..4].try_into().unwrap()))
+        }
+        REG_QWORD if value.bytes.len() >= 8 => {
+            json!(u64::from_le_bytes(value.bytes[..8].try_into().unwrap()))
+        }
         REG_MULTI_SZ => json!(decode_multi_sz(&value.bytes)),
         REG_SZ | REG_EXPAND_SZ => json!(decode_utf16(&value.bytes)),
         _ => json!(value.bytes),
@@ -150,18 +171,32 @@ fn strip_prefix_ci<'a>(input: &'a str, prefix: &str) -> Option<&'a str> {
 }
 
 fn display_name(name: &str) -> String {
-    if name.is_empty() { "(Default)".to_string() } else { name.to_string() }
+    if name.is_empty() {
+        "(Default)".to_string()
+    } else {
+        name.to_string()
+    }
 }
 
 fn decode_utf16(bytes: &[u8]) -> String {
-    let words: Vec<u16> = bytes.chunks_exact(2).map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])).collect();
-    let end = words.iter().position(|word| *word == 0).unwrap_or(words.len());
+    let words: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    let end = words
+        .iter()
+        .position(|word| *word == 0)
+        .unwrap_or(words.len());
     String::from_utf16_lossy(&words[..end])
 }
 
 fn decode_multi_sz(bytes: &[u8]) -> Vec<String> {
-    let words: Vec<u16> = bytes.chunks_exact(2).map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]])).collect();
-    words.split(|word| *word == 0)
+    let words: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+        .collect();
+    words
+        .split(|word| *word == 0)
         .filter(|part| !part.is_empty())
         .map(String::from_utf16_lossy)
         .collect()

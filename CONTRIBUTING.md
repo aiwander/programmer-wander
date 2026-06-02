@@ -50,4 +50,4 @@ By participating, you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-Contributions are licensed under [MIT](LICENSE).
+Contributions are licensed under [Apache-2.0](LICENSE).
