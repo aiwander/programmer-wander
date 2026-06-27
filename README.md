@@ -34,6 +34,8 @@ Programmer-Wander is a powerful local dev shell. If your AI host can call it, th
 
 Command-entry tools (`run`, `bash`, `powershell`, `smart_exec`, `chain`, `psession_run`, `wsl_run`, and `wsl_bg`) run through `security_check_cmd` before execution. Critical destructive patterns are blocked and logged; recursive delete-style commands must target an obviously disposable path such as `target/`, `build/`, `tmp/`, or `.cache/`.
 
+AIWander tools are local, user-authorized MCP capability surfaces. They do not grant an AI new permissions by themselves. They expose tools the user explicitly installs and enables. Sensitive actions should be confirmed by the user, credentials should stay in the OS keyring or local vault, and demos should use mock data.
+
 ## Install
 
 ### Option 1 — Portable (recommended)
@@ -43,7 +45,8 @@ Command-entry tools (`run`, `bash`, `powershell`, `smart_exec`, `chain`, `psessi
 3. Register with your AI host:
    ```powershell
    C:\tools\programmer\programmer.exe install --target claude-desktop
-   # or: --target lm-studio, --target cowork, --target claude-code, --target all
+   # or: --target lm-studio, --target cowork, --target claude-code
+   # Advanced: --target all registers every detected host.
    ```
 4. Restart your AI host
 
@@ -51,8 +54,9 @@ Command-entry tools (`run`, `bash`, `powershell`, `smart_exec`, `chain`, `psessi
 
 1. Download `programmer-windows-x64.msi` from [Releases](https://github.com/AIWander/Programmer-Wander/releases/latest)
 2. Run the MSI (UAC prompt; click Allow)
-3. The installer auto-runs `programmer install --target all` as a post-install action
-4. Restart your AI host
+3. The installer registers detected hosts as a broad install path
+4. For single-host registration, use the portable option above
+5. Restart your AI host
 
 ### Option 3 — Have your AI install it for you
 
